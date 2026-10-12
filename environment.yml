@@ -1,0 +1,24 @@
+name: anisize
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11
+  - numpy
+  - pandas
+  - scipy
+  - scikit-learn
+  - nibabel
+  - nilearn
+  - matplotlib
+  - seaborn
+  - joblib
+  - tqdm
+  - jupyterlab
+  - ipykernel
+  - pip
+  - setuptools
+  - wheel
+  - cython
+  - pip:
+      - pycortex
