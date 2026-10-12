@@ -13,7 +13,7 @@ datadir =pjoin(rootdir, f"results/Fig7c_hierarchical_partition/train80")
 model_info = pd.read_csv(pjoin(datadir, "hierarchical_partition_models.csv")) 
 maxmodel = model_info["index"].max() # full model with all regressors 
 properties = [
-    #"animacy", 
+    "animacy", 
     "curvature", "size", "natural", "moves", "precious", "be_moved",
     "heavy", "pleasant", "arousal", "agency", "humanness",
     "cuteness", "hardness", "manipulability"
