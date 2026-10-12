@@ -1,0 +1,128 @@
+# -----------------------------------------------------------------------------
+# Fig 6: Step 1: Compute bootstrapped regression slopes of all regressors.
+# The smoothness of the slope-maps is computed in Step2. 
+# -----------------------------------------------------------------------------
+import os
+from os.path import join as pjoin
+import numpy as np
+import pandas as pd
+import pickle
+
+def slopes_for_all_regressors(betas_samp, x_real, x_rand):
+    """
+    compute univariate slopes for all regressors at once, for real and shuffled events
+    Faster, simplified alternative to utils.linear_regression
+
+    betas_samp: (n_events, n_voxels)
+    x_real, x_rand: (n_events, n_regressors)
+
+    returns:
+        slopes_real, slopes_rand: (n_regressors, n_voxels)
+    """
+
+    y = np.asarray(betas_samp, dtype=float)
+    if y.ndim == 1:
+        y = y.reshape(-1, 1)
+
+    # center y once (intercept is implicit)
+    y_mean = y.mean(axis=0, keepdims=True)
+    y_centered = y - y_mean
+
+    def slopes_for_x(x):
+        x = np.asarray(x, dtype=float)
+
+        # standardize each regressor (like standard scaler)
+        x_mean = x.mean(axis=0, keepdims=True)
+        x_std = x.std(axis=0, keepdims=True)
+        x_std = np.where(x_std == 0, 1.0, x_std)
+        x_scaled = (x - x_mean) / x_std
+
+        # numerator: x_scaled^t y_centered, shape (n_regressors, n_voxels)
+        numerators = x_scaled.T @ y_centered
+
+        # denominator: sum over samples of x_scaled^2 for each regressor
+        denom = (x_scaled ** 2).sum(axis=0)  # (n_regressors,)
+        denom = np.where(denom == 0, 1.0, denom)
+
+        slopes = numerators / denom[:, None]
+        return slopes
+
+    slopes_real = slopes_for_x(x_real)
+    slopes_rand = slopes_for_x(x_rand)
+
+    return slopes_real, slopes_rand
+
+rootdir = "/Users/laurastoinski/playground/anisize"
+
+betadir = pjoin(rootdir, "data/whole_brain_FWHM4")
+eventdir = pjoin(rootdir, "data")
+resdir = pjoin(rootdir, "results/Fig6_bootstrap_topographies")
+os.makedirs(resdir, exist_ok=True)
+
+regressors = [
+    "animacy", "curvature", "size",
+    "natural", "moves", "precious", "be_moved",
+    "heavy", "manmade", "pleasant", "arousal", "agency",
+    "humanness", "cuteness", "consistency", "hardness",
+    "manipulability",
+]
+
+# load events once and convert to numpy
+events = pd.read_csv(pjoin(eventdir, "720_events.csv"))
+events["curvature"] = 100 - events["curvature"]
+events_mat = events[regressors].to_numpy(dtype=np.float32)
+
+subjects = ["01", "02", "03"]
+
+# bootstrap hyperparameters
+n_boot = 1000
+n_events = events_mat.shape[0]
+
+# precompute bootstrap samples
+rng = np.random.default_rng(0)
+idx_samples = rng.integers(0, n_events, size=(n_boot, n_events))
+
+# precompute fixed permutation for shuffled events
+rng_perm = np.random.default_rng(42)
+perm_rand = rng_perm.permutation(n_events)
+
+
+# -------------------------------------------------------------------------
+# main loop over subjects
+# -------------------------------------------------------------------------
+
+for sub in subjects:
+    print(f"processing subject {sub}")
+
+    betas_path = pjoin(betadir, f"sub{sub}_beta_matrix_whole_brain_means.pkl")
+    betas = np.load(betas_path, allow_pickle=True)
+    betas = np.asarray(betas, dtype=np.float32)  # shape: (n_events, n_voxels)
+
+    bootstrap_results_sub = {
+        "real": {reg: [] for reg in regressors},
+        "shuffled": {reg: [] for reg in regressors},
+    }
+
+    for i in range(n_boot):
+        sample_idx = idx_samples[i]
+
+        # resample events and betas
+        x_real = events_mat[sample_idx, :]       # (n_events, n_regressors)
+        x_rand = x_real[perm_rand, :]           # shuffled version
+        betas_samp = betas[sample_idx, :]       # (n_events, n_voxels)
+
+        # vectorized computation of slopes for all regressors
+        slopes_real, slopes_rand = slopes_for_all_regressors(
+            betas_samp, x_real, x_rand
+        )
+
+        # store slopes per regressor (each is (n_voxels,))
+        for j, reg in enumerate(regressors):
+            bootstrap_results_sub["real"][reg].append(slopes_real[j])
+            bootstrap_results_sub["shuffled"][reg].append(slopes_rand[j])
+
+    out_path = pjoin(resdir, f"sub{sub}_all_regressors_bootstrap.pkl")
+    with open(out_path, "wb") as f:
+        pickle.dump(bootstrap_results_sub, f)
+
+    print("saved:", out_path)
